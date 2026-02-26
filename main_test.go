@@ -26,13 +26,16 @@ func TestTmuxColor(t *testing.T) {
 
 func TestConfigBuildFormat(t *testing.T) {
 	tests := []struct {
-		name string
-		cfg  config
-		want string
+		name          string
+		cfg           config
+		contextName   string
+		namespaceName string
+		want          string
 	}{
 		{
 			"no colors",
 			config{separator: "/"},
+			"my-cluster", "default",
 			"{{.Context}}/{{.Namespace}}#[fg=default#,bg=default]",
 		},
 		{
@@ -43,17 +46,43 @@ func TestConfigBuildFormat(t *testing.T) {
 				nsFg: "green", nsBg: "",
 				separator: ":",
 			},
+			"my-cluster", "default",
 			"#[fg=blue,bg=default]{{.Context}}#[fg=colour250]:#[fg=green]{{.Namespace}}#[fg=default#,bg=default]",
 		},
 		{
-			"ctx colors only",
-			config{ctxFg: "red", separator: "/"},
-			"#[fg=red]{{.Context}}/{{.Namespace}}#[fg=default#,bg=default]",
+			"icon prefix",
+			config{icon: "⎈ ", separator: "/"},
+			"my-cluster", "default",
+			"⎈ {{.Context}}/{{.Namespace}}#[fg=default#,bg=default]",
+		},
+		{
+			"prodFg highlights context when context contains prod",
+			config{ctxFg: "blue", nsFg: "green", prodFg: "red", separator: "/"},
+			"my-prod-cluster", "default",
+			"#[fg=red]{{.Context}}/#[fg=green]{{.Namespace}}#[fg=default#,bg=default]",
+		},
+		{
+			"prodFg highlights namespace when namespace contains prod",
+			config{ctxFg: "blue", nsFg: "green", prodFg: "red", separator: "/"},
+			"my-cluster", "prod-ns",
+			"#[fg=blue]{{.Context}}/#[fg=red]{{.Namespace}}#[fg=default#,bg=default]",
+		},
+		{
+			"prodFg highlights both when both contain prod",
+			config{ctxFg: "blue", nsFg: "green", prodFg: "red", separator: "/"},
+			"my-prod-cluster", "prod-ns",
+			"#[fg=red]{{.Context}}/#[fg=red]{{.Namespace}}#[fg=default#,bg=default]",
+		},
+		{
+			"prodFg ignored when neither contains prod",
+			config{ctxFg: "blue", nsFg: "green", prodFg: "red", separator: "/"},
+			"my-staging-cluster", "default",
+			"#[fg=blue]{{.Context}}/#[fg=green]{{.Namespace}}#[fg=default#,bg=default]",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cfg.buildFormat()
+			got := tt.cfg.buildFormat(tt.contextName, tt.namespaceName)
 			if got != tt.want {
 				t.Errorf("buildFormat() = %q, want %q", got, tt.want)
 			}

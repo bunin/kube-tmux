@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/template"
 
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +35,8 @@ func parseFlags() config {
 	flag.StringVar(&cfg.nsFg, "nsFg", "", "Namespace foreground colour")
 	flag.StringVar(&cfg.nsBg, "nsBg", "", "Namespace background colour")
 	flag.StringVar(&cfg.separator, "separator", defaultSeparator, "Separator of Context and Namespace")
+	flag.StringVar(&cfg.icon, "icon", "⎈ ", "Icon prefix before context")
+	flag.StringVar(&cfg.prodFg, "prodFg", "", "Namespace foreground colour when context contains 'prod'")
 	flag.Parse()
 	return cfg
 }
@@ -58,7 +61,7 @@ func main() {
 	if flag.NArg() >= 1 {
 		format = flag.Arg(0)
 	} else {
-		format = cfg.buildFormat()
+		format = cfg.buildFormat(kctx.Context, kctx.Namespace)
 	}
 
 	if err := printContext(kctx, format); err != nil {
@@ -74,12 +77,24 @@ type config struct {
 	nsFg      string
 	nsBg      string
 	separator string
+	icon      string
+	prodFg    string
 }
 
-func (c config) buildFormat() string {
-	format := tmuxColor(c.ctxFg, c.ctxBg) + defaultContextFormat +
+func (c config) buildFormat(contextName, namespaceName string) string {
+	ctxFg := c.ctxFg
+	if c.prodFg != "" && strings.Contains(strings.ToLower(contextName), "prod") {
+		ctxFg = c.prodFg
+	}
+	nsFg := c.nsFg
+	if c.prodFg != "" && strings.Contains(strings.ToLower(namespaceName), "prod") {
+		nsFg = c.prodFg
+	}
+
+	format := c.icon +
+		tmuxColor(ctxFg, c.ctxBg) + defaultContextFormat +
 		tmuxColor(c.sepFg, c.sepBg) + c.separator +
-		tmuxColor(c.nsFg, c.nsBg) + defaultNamespaceFormat +
+		tmuxColor(nsFg, c.nsBg) + defaultNamespaceFormat +
 		"#[fg=default#,bg=default]"
 	return format
 }
