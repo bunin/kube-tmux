@@ -1,4 +1,4 @@
-module github.com/go-tmux/kube-tmux
+module github.com/bunin/kube-tmux
 
 go 1.25.0
 
