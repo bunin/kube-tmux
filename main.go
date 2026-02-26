@@ -15,10 +15,9 @@ import (
 )
 
 const (
-	defaultSepalater       = "/"
+	defaultSeparator       = "/"
 	defaultContextFormat   = "{{.Context}}"
 	defaultNamespaceFormat = "{{.Namespace}}"
-	defaultformat          = defaultContextFormat + defaultSepalater + defaultNamespaceFormat
 )
 
 type kubeContext struct {
@@ -26,7 +25,48 @@ type kubeContext struct {
 	Namespace string
 }
 
-var (
+func parseFlags() config {
+	var cfg config
+	flag.StringVar(&cfg.ctxFg, "ctxFg", "", "Context foreground colour")
+	flag.StringVar(&cfg.ctxBg, "ctxBg", "", "Context background colour")
+	flag.StringVar(&cfg.sepFg, "sepFg", "", "Separator foreground colour")
+	flag.StringVar(&cfg.sepBg, "sepBg", "", "Separator background colour")
+	flag.StringVar(&cfg.nsFg, "nsFg", "", "Namespace foreground colour")
+	flag.StringVar(&cfg.nsBg, "nsBg", "", "Namespace background colour")
+	flag.StringVar(&cfg.separator, "separator", defaultSeparator, "Separator of Context and Namespace")
+	flag.Parse()
+	return cfg
+}
+
+func main() {
+	cfg := parseFlags()
+
+	kctx, err := loadKubeContext()
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "[ERROR] %v\n", err)
+		return
+	}
+
+	if kctx.Namespace == "" {
+		if err := printContext(kctx, defaultContextFormat); err != nil {
+			fmt.Fprintln(os.Stdout, "[ERROR] could not print kube context")
+		}
+		return
+	}
+
+	var format string
+	if flag.NArg() >= 1 {
+		format = flag.Arg(0)
+	} else {
+		format = cfg.buildFormat()
+	}
+
+	if err := printContext(kctx, format); err != nil {
+		fmt.Fprintf(os.Stdout, "[ERROR] could not print kube context: %v\n", err)
+	}
+}
+
+type config struct {
 	ctxFg     string
 	ctxBg     string
 	sepFg     string
@@ -34,109 +74,59 @@ var (
 	nsFg      string
 	nsBg      string
 	separator string
-)
-
-func init() {
-	flag.StringVar(&ctxFg, "ctxFg", "", "Context foreground colour")
-	flag.StringVar(&ctxBg, "ctxBg", "", "Context background colour")
-	flag.StringVar(&sepFg, "sepFg", "", "Separator foreground colour")
-	flag.StringVar(&sepBg, "sepBg", "", "Separator background colour")
-	flag.StringVar(&nsFg, "nsFg", "", "Namespace foreground colour")
-	flag.StringVar(&nsBg, "nsBg", "", "Namespace background colour")
-	flag.StringVar(&separator, "separator", defaultSepalater, "Separator of Context and Namespace")
 }
 
-func main() {
-	flag.Parse()
+func (c config) buildFormat() string {
+	format := tmuxColor(c.ctxFg, c.ctxBg) + defaultContextFormat +
+		tmuxColor(c.sepFg, c.sepBg) + c.separator +
+		tmuxColor(c.nsFg, c.nsBg) + defaultNamespaceFormat +
+		"#[fg=default#,bg=default]"
+	return format
+}
 
+func loadKubeContext() (kubeContext, error) {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	configOverrides := &clientcmd.ConfigOverrides{}
 	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
 
-	config, err := kubeConfig.RawConfig()
+	rawConfig, err := kubeConfig.RawConfig()
 	if err != nil {
-		fmt.Fprintln(os.Stdout, "[ERROR] could not get kubeconfig")
-		return
+		return kubeContext{}, fmt.Errorf("could not get kubeconfig: %w", err)
 	}
-	if len(config.Contexts) == 0 {
-		fmt.Fprintln(os.Stdout, "[ERROR] kubeconfig is empty")
-		return
+	if len(rawConfig.Contexts) == 0 {
+		return kubeContext{}, fmt.Errorf("kubeconfig is empty")
 	}
 
-	curCtx := config.CurrentContext
+	curCtx := rawConfig.CurrentContext
 	if curCtx == "" {
-		kctx := kubeContext{
-			Context: "empty",
-		}
-		if err := printContext(kctx, defaultContextFormat); err != nil {
-			fmt.Fprintln(os.Stdout, "[ERROR] could not print kube context")
-		}
-		return
+		return kubeContext{Context: "empty"}, nil
 	}
 
-	kctx := kubeContext{
-		Context: curCtx,
+	kctx := kubeContext{Context: curCtx}
+	if ns := rawConfig.Contexts[curCtx].Namespace; ns != "" {
+		kctx.Namespace = ns
+	} else {
+		kctx.Namespace = corev1.NamespaceDefault
 	}
+	return kctx, nil
+}
 
-	curNs := config.Contexts[curCtx].Namespace
-	if curNs == "" {
-		curNs = corev1.NamespaceDefault
+func tmuxColor(fg, bg string) string {
+	if fg == "" && bg == "" {
+		return ""
 	}
-	kctx.Namespace = curNs
-
-	var format string
-	switch {
-	case flag.CommandLine.NArg() > 1:
-		format = flag.CommandLine.Arg(0)
-	default:
-		// TODO(zchee): refactoring
-		if ctxFg != "" || ctxBg != "" {
-			format = "#["
-		}
-		if ctxFg != "" {
-			format += "fg=" + ctxFg
-		}
-		if ctxBg != "" {
-			format += ",bg=" + ctxBg
-		}
-		if ctxFg != "" || ctxBg != "" {
-			format += "]"
-		}
-		format += defaultContextFormat
-
-		if sepFg != "" || sepBg != "" {
-			format += "#["
-		}
-		if sepFg != "" {
-			format += "fg=" + sepFg
-		}
-		if sepBg != "" {
-			format += ",bg=" + sepBg
-		}
-		if sepFg != "" || sepBg != "" {
-			format += "]"
-		}
-		format += separator
-
-		if nsFg != "" || nsBg != "" {
-			format += "#["
-		}
-		if nsFg != "" {
-			format += "fg=" + nsFg
-		}
-		if nsBg != "" {
-			format += ",bg=" + nsBg
-		}
-		if nsFg != "" || nsBg != "" {
-			format += "]"
-		}
-		format += defaultNamespaceFormat
-		format += "#[fg=default#,bg=default]"
+	s := "#["
+	if fg != "" {
+		s += "fg=" + fg
 	}
-
-	if err := printContext(kctx, format); err != nil {
-		fmt.Fprintf(os.Stdout, "[ERROR] could not print kube context: %v\n", err)
+	if fg != "" && bg != "" {
+		s += ","
 	}
+	if bg != "" {
+		s += "bg=" + bg
+	}
+	s += "]"
+	return s
 }
 
 func printContext(kctx kubeContext, format string) error {
